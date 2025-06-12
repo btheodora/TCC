@@ -1,0 +1,1 @@
+A evolução histórica do S\&P 500, ilustrada na Figura \ref{sp500crises}, demonstra como eventos macroeconômicos e geopolíticos significativos influenciam o desempenho do índice. Nas últimas décadas, períodos de crise global resultaram em quedas acentuadas seguidas de recuperações, evidenciando a resiliência do mercado acionário.
