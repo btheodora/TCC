@@ -1,0 +1,48 @@
+    import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import pandas as pd
+
+data = {
+    'Data': [
+        '2025-05-01', '2025-05-02', '2025-05-05', '2025-05-06', '2025-05-07',
+        '2025-05-08', '2025-05-09', '2025-05-12', '2025-05-13', '2025-05-14',
+        '2025-05-15', '2025-05-16', '2025-05-19', '2025-05-20', '2025-05-21',
+        '2025-05-22', '2025-05-23', '2025-05-27', '2025-05-28', '2025-05-29',
+        '2025-05-30'
+    ],
+    'Previsto': [
+        5584.53, 5627.28, 5722.98, 5819.05, 5804.45,
+        5797.75, 5956.56, 5951.11, 5909.29, 6015.28,
+        6011.36, 6085.94, 6104.73, 5978.77, 6009.13,
+        6111.73, 6061.90, 6119.81, 6096.70, 6324.29,
+        6184.95
+    ],
+    'Real': [
+        5604.14, 5686.67, 5650.38, 5606.91, 5631.28,
+        5663.94, 5659.91, 5844.19, 5886.55, 5892.58,
+        5916.93, 5958.38, 5963.60, 5940.46, 5844.61,
+        5842.01, 5802.82, 5921.54, 5888.55, 5912.17,
+        5911.69
+    ]
+}
+
+# DataFrame
+df_plot = pd.DataFrame(data)
+df_plot['Data'] = pd.to_datetime(df_plot['Data'])
+
+# Grafico
+plt.figure(figsize=(14, 6))
+plt.plot(df_plot['Data'], df_plot['Real'], label='Real (Teste)', linewidth=2)
+plt.plot(df_plot['Data'], df_plot['Previsto'], label='Previsto (Teste)', linestyle='--')
+
+plt.xlabel('Data', fontsize=14)
+plt.ylabel('Pontos', fontsize=14)
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
+plt.legend(fontsize=14)
+plt.grid(False)
+plt.tight_layout()
+ax = plt.gca()
+ax.xaxis.set_major_formatter(mdates.DateFormatter('%d-%m-%Y'))
+plt.savefig("avaliacao_maio2025_lstmTCC.pdf", dpi=300)
+plt.show()
