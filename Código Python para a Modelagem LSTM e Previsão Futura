@@ -1,0 +1,245 @@
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import matplotlib.pyplot as plt
+import seaborn as sns
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error
+import tensorflow as tf
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dense, Dropout, Input
+import matplotlib.dates as mdates
+
+# Reprodutibilidade
+np.random.seed(42)
+tf.random.set_seed(42)
+
+# Coleta de dados
+start_date = '2000-01-01'
+end_date = '2025-05-01'
+
+sp500 = yf.download('^GSPC', start=start_date, end=end_date, interval='1d')[['Close', 'Volume']]
+sp500.dropna(inplace=True)
+sp500.columns = ['SP500_Close', 'SP500_Volume']
+
+interest_rate = yf.download('^IRX', start=start_date, end=end_date, interval='1d')[['Close']]
+interest_rate.columns = ['Interest_Rate']
+interest_rate.dropna(inplace=True)
+
+df = sp500.join(interest_rate, how='inner')
+
+# Normalizacao
+scaler = MinMaxScaler()
+df_scaled = pd.DataFrame(scaler.fit_transform(df), index=df.index, columns=df.columns)
+
+# Preparacao para LSTM
+n_steps = 60
+X, y, dates = [], [], []
+
+for i in range(n_steps, len(df_scaled)):
+    X.append(df_scaled.iloc[i - n_steps:i].values)
+    y.append(df_scaled.iloc[i]['SP500_Close'])
+    dates.append(df_scaled.index[i])
+
+X, y, dates = np.array(X), np.array(y), np.array(dates)
+
+# Divisoes ajustadas: Treino, Validacao, Teste
+train_mask = (dates >= pd.Timestamp('2000-01-01')) & (dates <= pd.Timestamp('2022-12-31'))
+val_mask   = (dates >= pd.Timestamp('2023-01-01')) & (dates <= pd.Timestamp('2023-12-31'))
+test_mask  = (dates >= pd.Timestamp('2024-01-01')) & (dates <= pd.Timestamp('2025-05-01'))
+
+X_train, y_train = X[train_mask], y[train_mask]
+X_val, y_val     = X[val_mask], y[val_mask]
+X_test, y_test   = X[test_mask], y[test_mask]
+test_dates       = dates[test_mask]
+
+# Modelo LSTM
+model = Sequential([
+    Input(shape=(X.shape[1], X.shape[2])),
+    LSTM(64, return_sequences=True),
+    Dropout(0.2),
+    LSTM(64),
+    Dropout(0.2),
+    Dense(1)
+])
+model.compile(optimizer='adam', loss='mean_squared_error')
+
+# Treinamento
+history = model.fit(X_train, y_train, epochs=30, batch_size=32, validation_data=(X_val, y_val), verbose=1)
+
+# Previsoes no conjunto de teste
+y_pred_test = model.predict(X_test)
+sp500_close_idx = df.columns.get_loc('SP500_Close')
+
+def inverse_scale(y_scaled):
+    temp = np.zeros((len(y_scaled), df_scaled.shape[1]))
+    temp[:, sp500_close_idx] = y_scaled
+    return scaler.inverse_transform(temp)[:, sp500_close_idx]
+
+y_test_real = inverse_scale(y_test)
+y_pred_real = inverse_scale(y_pred_test.flatten())
+
+# Metricas
+mse = mean_squared_error(y_test_real, y_pred_real)
+rmse = np.sqrt(mse)
+print(f"\n Test MSE: {mse:.4f} | RMSE: {rmse:.4f}")
+
+# Grafico 1 - Avaliacao
+plt.figure(figsize=(14, 6))
+plt.plot(test_dates, y_test_real, label='Real (Teste)', linewidth=2)
+plt.plot(test_dates, y_pred_real, label='Previsto (Teste)', linestyle='--')
+plt.xlabel('Data', fontsize=14)
+plt.ylabel('Pontos', fontsize=14)
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
+plt.legend(fontsize=14)
+plt.grid(False)
+plt.tight_layout()
+ax = plt.gca()
+ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%Y'))
+plt.savefig("avaliacao_teste_lstmTCC.pdf", dpi=300)
+plt.show()
+
+# Previsao Futura com Sazonalidade e Ruido (30 dias uteis)
+future_start = pd.Timestamp('2025-05-01')
+last_sequence_date = future_start - pd.Timedelta(days=1)
+index_position = df.index.get_loc(last_sequence_date)
+last_sequence = df_scaled.iloc[index_position - n_steps + 1: index_position + 1].values.reshape(1, n_steps, df_scaled.shape[1])
+
+# Estimativas historicas para ruido e sazonalidade
+daily_returns = df['SP500_Close'].pct_change().dropna()
+volatility = daily_returns[-252:].std()
+seasonality_pattern = daily_returns[-252:].groupby(daily_returns[-252:].index.dayofyear).mean()
+
+predictions = []
+future_dates = pd.date_range(start=future_start, periods=30, freq='B')
+
+for i, future_date in enumerate(future_dates):
+    next_pred_scaled = model.predict(last_sequence, verbose=0)[0][0]
+
+    # Converte previsao para escala real
+    temp = np.zeros((1, df_scaled.shape[1]))
+    temp[0, sp500_close_idx] = next_pred_scaled
+    predicted_price = scaler.inverse_transform(temp)[0, sp500_close_idx]
+
+    # Ajusta com sazonalidade e ruido
+    day_of_year = future_date.dayofyear
+    seasonal_return = seasonality_pattern.get(day_of_year, 0)
+    noise = np.random.normal(loc=0, scale=volatility)
+    predicted_price *= (1 + seasonal_return + noise)
+
+    # Armazena e atualiza sequencia
+    predictions.append(predicted_price)
+    temp_df = df.iloc[[index_position]].copy()
+    temp_df.iloc[0, sp500_close_idx] = predicted_price
+    temp_scaled = scaler.transform(temp_df)
+    new_entry = np.append(last_sequence[0, 1:, :], [temp_scaled[0]], axis=0)
+    last_sequence = new_entry.reshape(1, n_steps, df_scaled.shape[1])
+
+# Impressao das datas e valores previstos
+print("\n Projecao de 30 dias (com sazonalidade e ruido) a partir de 01/05/2025:\n")
+for date, price in zip(future_dates, predictions):
+    print(f"{date.strftime('%Y-%m-%d')} {price:.2f} pontos")
+
+# Grafico 2 - Previsao Futura
+plt.figure(figsize=(14, 6))
+plt.plot(df.index, df['SP500_Close'], label='Historico S&P 500')
+plt.plot(future_dates, predictions, label='Previsao Futura (30 dias)', linestyle='--', color='orange')
+plt.xlabel('Data', fontsize=14)
+plt.ylabel('Pontos', fontsize=14)
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
+plt.legend(fontsize=14)
+plt.grid(False)
+plt.tight_layout()
+ax = plt.gca()
+ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%Y'))
+plt.savefig("previsao_futura_lstmTCC.pdf", dpi=300)
+plt.show()
+
+# Grafico 3 - Zoom
+start_zoom = pd.Timestamp('2024-01-01')
+end_zoom = future_dates[-1]
+
+historical_mask = (df.index >= start_zoom)
+historical_zoom_dates = df.index[historical_mask]
+historical_zoom_prices = df['SP500_Close'][historical_mask]
+
+plt.figure(figsize=(14, 6))
+plt.plot(historical_zoom_dates, historical_zoom_prices, label='Historico desde 2024')
+plt.plot(future_dates, predictions, label='Previsao Futura (30 dias)', linestyle='--', color='orange')
+plt.xlabel('Data', fontsize=14)
+plt.ylabel('Pontos', fontsize=14)
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
+plt.ylim(3500, 6500)
+plt.xlim(start_zoom, end_zoom)
+plt.legend(fontsize=14)
+plt.grid(False)
+plt.tight_layout()
+ax = plt.gca()
+ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%Y'))
+plt.savefig("zoom_projecao_futura_lstmTCC.pdf", dpi=300)
+plt.show()
+
+#RMSE
+meses_datetime = pd.to_datetime([mes + '-01' for mes in rmse_por_mes.keys()])
+
+# Grafico RMSE por Mes
+plt.figure(figsize=(14, 6))
+plt.plot(meses_datetime, list(rmse_por_mes.values()), marker='o', linestyle='-', linewidth=2, label='RMSE por mes')
+
+# Rotulos de cada ponto
+for i, v in enumerate(rmse_por_mes.values()):
+    plt.text(meses_datetime[i], v + max(rmse_por_mes.values()) * 0.01, f'{v:.2f}', 
+             ha='center', fontsize=12)
+
+plt.xlabel('Data', fontsize=14)
+plt.ylabel('RMSE (Pontos)', fontsize=14)
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
+plt.grid(False)
+plt.legend(fontsize=14)
+ax = plt.gca()
+ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%Y'))
+plt.tight_layout()
+plt.savefig("rmse_por_mes_lstmTCC.pdf", dpi=300)
+plt.show()
+
+#MAPE
+# DataFrame
+df_mape = pd.DataFrame({
+    'Data': test_dates,  # np.array de datas
+    'Real': y_test_real,  # valores reais (nao escalados)
+    'Previsto': y_pred_real  # valores previstos (nao escalados)
+})
+
+# Agrupamento por mes
+df_mape['AnoMes'] = df_mape['Data'].dt.to_period('M')
+df_mape['ErroPercentual'] = np.abs((df_mape['Real'] - df_mape['Previsto']) / df_mape['Real']) * 100
+
+# MAPE por mes
+mape_por_mes = df_mape.groupby('AnoMes')['ErroPercentual'].mean().round(2)
+
+meses_datetime = pd.to_datetime([str(m) for m in mape_por_mes.index])
+
+# Grafico do MAPE por mes
+plt.figure(figsize=(14, 6))
+plt.plot(meses_datetime, mape_por_mes.values, marker='o', linestyle='-', linewidth=2, label='MAPE por mes')
+
+# Rotulos de cada ponto
+for i, v in enumerate(mape_por_mes.values):
+    plt.text(meses_datetime[i], v + max(mape_por_mes.values) * 0.01, f'{v:.2f}%', 
+             ha='center', fontsize=12)
+
+plt.xlabel('Data', fontsize=14)
+plt.ylabel('MAPE (%)', fontsize=14)
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
+plt.grid(False)
+plt.legend(fontsize=14)
+ax = plt.gca()
+ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%Y'))
+plt.tight_layout()
+plt.savefig("mape_por_mes_lstmTCC.pdf", dpi=300)
+plt.show()
