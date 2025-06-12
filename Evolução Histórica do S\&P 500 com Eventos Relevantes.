@@ -1,0 +1,101 @@
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import pandas as pd
+import seaborn as sns
+import yfinance as yf
+from datetime import datetime
+
+# Configurações de estilo (ABNT)
+plt.style.use('seaborn-v0_8-whitegrid')
+sns.set_palette("husl")
+plt.rcParams.update({
+    'font.family': 'serif',
+    'font.serif': ['Times New Roman'],
+    'font.size': 12,
+    'axes.labelsize': 14,
+    'axes.titlesize': 16,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'legend.fontsize': 12,
+    'grid.alpha': 0.0,
+    'axes.edgecolor': 'black',
+    'axes.linewidth': 0.8,
+    'figure.dpi': 600
+})
+
+# Função para obter dados do S&P 500
+def get_sp500_data():
+    try:
+        df = yf.download('^GSPC', start='1990-01-01', end='2024-12-31', auto_adjust=True, progress=False)
+        df = df[['Close']]
+        df.rename(columns={'Close': 'Adj Close'}, inplace=True)
+        df.dropna(inplace=True)
+        return df
+    except Exception as e:
+        print(f"Erro ao obter dados do yfinance: {e}")
+        return None
+
+# Obter dados
+sp500 = get_sp500_data()
+if sp500 is None or sp500.empty:
+    print("Erro: dados não disponíveis.")
+    exit()
+
+# Criar figura
+fig, ax = plt.subplots(figsize=(14, 8))
+
+# Plotar série do S&P 500
+ax.plot(sp500.index, sp500['Adj Close'], color='#1f77b4', linewidth=2, label='S&P 500')
+
+# Eventos históricos com datas revisadas
+eventos = {
+    'Crise Dot-com (2000)': ('2000-03-10', 1498),
+    'Crise Subprime (2008)': ('2008-09-15', 1252),
+    'Teto da Dívida (2011)': ('2011-08-02', 1199),
+    'Brexit (2016)': ('2016-06-23', 2037),
+    'COVID-19 (2020)': ('2020-03-11', 2237),
+    'Inflação EUA (2022)': ('2022-06-10', 3900)
+}
+
+# Ajustes de posição para evitar sobreposição
+ajustes_texto = {
+    'Crise Dot-com (2000)': dict(xytext=(-80, 40)),
+    'Crise Subprime (2008)': dict(xytext=(30, -60)),
+    'Teto da Dívida (2011)': dict(xytext=(50, -20)),
+    'Brexit (2016)': dict(xytext=(-100, 50)),
+    'COVID-19 (2020)': dict(xytext=(75, 40)),
+    'Inflação EUA (2022)': dict(xytext=(-95, 20))
+}
+
+# Adicionar marcadores e anotações dos eventos
+for evento, (data, nivel) in eventos.items():
+    dt = pd.to_datetime(data)
+    ax.scatter(dt, nivel, color='red', zorder=5, s=50)
+    ax.annotate(evento, (dt, nivel),
+                xytext=ajustes_texto[evento]['xytext'],
+                textcoords='offset points',
+                arrowprops=dict(arrowstyle="->", color='black', lw=0.8),
+                backgroundcolor='white',
+                fontsize=14,
+                ha='center')
+
+# Formatação dos eixos
+ax.xaxis.set_major_locator(mdates.YearLocator(5))
+ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+
+# Formatar eixo y sem prefixo de moeda
+ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f'{x:,.0f}'))
+
+ax.set_xlabel('Ano', labelpad=15)
+ax.set_ylabel('Valor do Índice (Pontos)', labelpad=15)
+ax.legend(loc='upper left', frameon=True)
+
+# Ajuste de layout
+plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+# Salvar imagem em alta qualidade
+plt.savefig('sp500_yfinance_abnt.png', bbox_inches='tight', dpi=600)
+plt.savefig('sp500_yfinance_abnt.pdf', format='pdf', bbox_inches='tight', dpi=1200)
+
+# Exibir
+plt.show()
