@@ -1,0 +1,69 @@
+import yfinance as yf
+import pandas as pd
+import matplotlib.pyplot as plt
+from statsmodels.tsa.seasonal import seasonal_decompose
+import matplotlib.dates as mdates
+
+# 1. Coleta de dados
+df = yf.download('^GSPC', start='2000-01-01', end='2025-05-01', progress=False)[['Close']]
+df = df.asfreq('B')  # Frequencia de dias uteis
+df.dropna(inplace=True)
+
+# 2. Decomposicao da serie (modelo multiplicativo)
+decomposicao = seasonal_decompose(df['Close'], model='multiplicative', period=252)
+
+# 3. Grafico da Decomposicao
+plt.rcParams.update({'figure.figsize': (14, 8)})
+
+fig = decomposicao.plot()
+
+# Titulos dos Subgraficos
+componentes = ['Observado', 'Tendencia', 'Sazonalidade', 'Residuo']
+for ax, titulo in zip(fig.axes, componentes):
+    ax.set_ylabel(titulo, fontsize=14)
+    ax.set_xlabel('Data', fontsize=14)
+    ax.set_xlim(pd.to_datetime('2000-01-01'), pd.to_datetime('2025-05-01'))
+    ax.xaxis.set_major_locator(mdates.YearLocator(4, month=1, day=1))  # Agora de 4 em 4 anos
+    ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+    ax.tick_params(axis='both', labelsize=14)
+
+plt.tight_layout()
+plt.savefig("decomposicao_sp500_pt.pdf", dpi=300)
+plt.show()
+
+# 5. Grafico 2 - Recorte de dois anos da sazonalidade
+sazonal = decomposicao.seasonal
+sazonal_recorte = sazonal['2023':'2024']
+
+plt.figure(figsize=(14, 5))
+plt.plot(sazonal_recorte.index, sazonal_recorte.values, label='Sazonalidade', color='tab:blue', linewidth=2)
+
+plt.xlabel('Mes', fontsize=14)
+plt.ylabel('Fator Sazonal', fontsize=14)
+plt.xticks(
+    sazonal_recorte.index[::21],
+    sazonal_recorte.index.to_series().dt.strftime('%m-%Y')[::21],
+    rotation=45,
+    fontsize=14
+)
+plt.yticks(fontsize=14)
+plt.legend(fontsize=14)
+plt.grid(False)
+plt.tight_layout()
+plt.savefig("sazonalidade_sp500_2023_2024.pdf", dpi=300)
+plt.show()
+
+# 6. Grafico 3 - Residuo
+plt.figure(figsize=(14, 4))
+plt.plot(decomposicao.resid, color='C0', label='Residuo')
+plt.xlabel('Data', fontsize=14)
+plt.ylabel('Residuo', fontsize=14)
+plt.xticks(fontsize=14)
+plt.yticks(fontsize=14)
+plt.grid(False)
+plt.legend(loc='upper right', fontsize=14)
+plt.gca().xaxis.set_major_locator(mdates.YearLocator(4))
+plt.gca().xaxis.set_major_formatter(mdates.DateFormatter('%Y'))
+plt.tight_layout()
+plt.savefig("residuo_sp500_pt.pdf", dpi=300)
+plt.show()
